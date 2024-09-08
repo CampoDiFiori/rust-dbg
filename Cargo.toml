@@ -1,0 +1,21 @@
+[package]
+name = "cool"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+addr2line = "0.23.0"
+capstone = "0.12.0"
+color-eyre = "0.6.3"
+dotenv = "0.15"
+eyre = "0.6"
+gimli = "0.31.0"
+nix = { version = "0.29.0", features = ["process", "ptrace", "fs"] }
+object = "0.36.0"
+ratatui = "0.28.1"
+rustc-demangle = "0.1.24"
+thiserror = "1.0.61"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+walkdir = "2.5.0"
+

@@ -1,0 +1,3 @@
+[build]
+# -no_pie rationale: https://github.com/gimli-rs/addr2line/issues/114
+rustflags = ["-C", "link-args=-Wl,-gdwarf-2,-no_pie"]
