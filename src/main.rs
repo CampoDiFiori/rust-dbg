@@ -25,22 +25,16 @@ fn main_inner() -> Result<()> {
     let main_addr = find_main_symbol_address(&loader, &object, &file_cache).unwrap();
     let pid = spawn_process(executable)?;
 
-    trace!("{:?}", nix::sys::wait::wait().unwrap());
+    trace!("{:?}", nix::sys::wait::wait()?);
 
-    let base_address0 = utils::get_base_address_from_ip(pid, &object)?;
-    let base_address = utils::get_base_address(pid, executable).unwrap();
-    let base_address2 = utils::get_base_address2(pid).unwrap();
+    let base_address = utils::get_base_address_from_procfs(pid).unwrap();
 
-    trace!("0: 0x{base_address0:x}, 1: 0x{base_address:x}, 2: 0x{base_address2:x}");
-
-    let mut debugger = Debugger::new(base_address2, object, pid)?;
+    let mut debugger = Debugger::new(executable, base_address, object, pid)?;
 
     trace!("Tracee's base address is  0x{base_address:02x}");
 
     debugger.set_breakpoint(main_addr)?;
-    debugger.wait_for_tracee()?;
-    // std::thread::sleep(std::time::Duration::from_secs();
-    // debugger.run()?;
+    debugger.run()?;
 
     Ok(())
 }
@@ -52,9 +46,12 @@ fn main() {
     // Initialize color-eyre for error reporting
     color_eyre::install().unwrap();
 
+    let writer = std::fs::File::create("cool.log").unwrap();
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
+                .with_writer(writer)
                 .with_filter(tracing_subscriber::EnvFilter::from_default_env()),
         )
         .init();

@@ -3,11 +3,10 @@ use capstone::{
     Capstone,
 };
 use color_eyre::Result;
-use eyre::WrapErr;
 use nix::{
     sys::{
         ptrace::{self, AddressType},
-        wait::{self, wait, WaitStatus},
+        wait::{wait, WaitStatus},
     },
     unistd::{fork, ForkResult, Pid},
 };
@@ -17,31 +16,46 @@ use tracing::{debug, instrument, trace};
 
 const BREAKPOINT_INSTRUCTION: i64 = 0xCC;
 
-#[derive(Debug)]
+pub type Address = usize;
+
 pub struct Debugger {
+    #[allow(dead_code)]
     pub object: object::File<'static>,
     pub base_address: usize,
     pub disassembler: Capstone,
     pub pid: Pid,
-    pub breakpoints: HashMap<usize, i64>,
+    pub loader: addr2line::Loader,
+    pub breakpoints: HashMap<Address, BreakPoint>,
+}
+
+pub struct BreakPoint {
+    pub original_instruction: i64,
+    pub relative_addr: Address,
 }
 
 impl Debugger {
-    pub fn new(base_address: usize, object: object::File<'static>, pid: Pid) -> Result<Self> {
+    pub fn new(
+        executable: &str,
+        base_address: usize,
+        object: object::File<'static>,
+        pid: Pid,
+    ) -> Result<Self> {
         let disassembler = Capstone::new().x86().mode(ArchMode::Mode64).build()?;
+        let loader = addr2line::Loader::new(executable).unwrap();
 
         Ok(Debugger {
             base_address,
             object,
             disassembler,
             pid,
+            loader,
             breakpoints: HashMap::new(),
         })
     }
 
     #[instrument(ret, err, skip(self))]
-    pub fn set_breakpoint(&mut self, address_offset: usize) -> Result<()> {
-        let address = self.base_address + address_offset;
+    pub fn set_breakpoint(&mut self, relative_addr: usize) -> Result<()> {
+        let address = self.base_address + relative_addr;
 
         let original_instruction = ptrace::read(self.pid, address as AddressType)? as i64;
         trace!("Read the current instruction at 0x{address:x}");
@@ -56,7 +70,7 @@ impl Debugger {
                 trace!(
                     "Setting breakpoint at 0x{:x} (0x{:x}): {} {}",
                     instruction.address(),
-                    address_offset,
+                    relative_addr,
                     instruction.mnemonic().unwrap(),
                     instruction.op_str().unwrap_or("")
                 );
@@ -73,22 +87,32 @@ impl Debugger {
         )?;
 
         trace!("Store the original instruction");
-        self.breakpoints.insert(address, original_instruction);
+        self.breakpoints.insert(
+            address,
+            BreakPoint {
+                original_instruction,
+                relative_addr,
+            },
+        );
 
         Ok(())
     }
 
     #[instrument(ret, err, skip(self))]
-    fn handle_breakpoint(&mut self) -> Result<()> {
+    fn handle_breakpoint(&self) -> Result<()> {
         let regs = ptrace::getregs(self.pid)?;
         let breakpoint_address = (regs.rip - 1) as usize;
 
-        if let Some(&original_instruction) = self.breakpoints.get(&breakpoint_address) {
+        let Some(bp) = self.breakpoints.get(&breakpoint_address) else {
+            eyre::bail!("No breakpoint found for address {breakpoint_address}");
+        };
+
+        {
             // Restore the original instruction
             ptrace::write(
                 self.pid,
                 breakpoint_address as AddressType,
-                original_instruction as std::ffi::c_long,
+                bp.original_instruction as std::ffi::c_long,
             )?;
 
             // Set the instruction pointer back to the start of the instruction
@@ -96,14 +120,26 @@ impl Debugger {
             new_regs.rip -= 1;
             ptrace::setregs(self.pid, new_regs)?;
 
-            println!("Breakpoint hit at address 0x{:x}", breakpoint_address);
+            debug!("Breakpoint hit at address 0x{:x}", breakpoint_address);
         }
 
-        Ok(())
-    }
+        {
+            let Ok(Some(location)) = self.loader.find_location(bp.relative_addr as _) else {
+                debug!("No location in source found for address 0x{breakpoint_address:2x}");
+                return Ok(());
+            };
 
-    pub fn wait_for_tracee(&self) -> Result<()> {
-        wait()?;
+            let Some((file_name, line_nr)) = location.file.zip(location.line) else {
+                debug!("No file or line found for address 0x{breakpoint_address:2x}");
+                return Ok(());
+            };
+
+            let file = std::fs::read_to_string(file_name)?;
+            let line = file.lines().nth(line_nr as usize - 1).unwrap();
+
+            trace!("{file_name}:{line_nr}: {line}");
+        }
+
         Ok(())
     }
 
@@ -113,6 +149,10 @@ impl Debugger {
             ptrace::cont(self.pid, None)?;
             let wait_status = wait()?;
             trace!("Tracer: received wait status: {wait_status:?}");
+
+            if let WaitStatus::Exited(_, _) = wait_status {
+                break;
+            }
 
             let regs = ptrace::getregs(self.pid)?;
             trace!("Got regs: {regs:?}");
@@ -124,6 +164,8 @@ impl Debugger {
                 self.handle_breakpoint()?;
             }
         }
+
+        Ok(())
     }
 }
 

@@ -19,6 +19,8 @@ pub enum AppError {
     NotAbsolutePath,
     #[error("No main function symbol found in the binary")]
     NoMainFunction,
+    #[error("No location in source found for address")]
+    NoLocationFound,
     #[error("Errno was returned")]
     Errno(#[from] nix::errno::Errno),
 }
