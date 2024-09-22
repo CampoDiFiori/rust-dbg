@@ -12,7 +12,7 @@ use nix::{
 };
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument};
 
 const BREAKPOINT_INSTRUCTION: i64 = 0xCC;
 
@@ -58,7 +58,7 @@ impl Debugger {
         let address = self.base_address + relative_addr;
 
         let original_instruction = ptrace::read(self.pid, address as AddressType)? as i64;
-        trace!("Read the current instruction at 0x{address:x}");
+        debug!("Read the current instruction at 0x{address:x}");
 
         {
             let instruction_bytes = original_instruction.to_le_bytes();
@@ -67,7 +67,7 @@ impl Debugger {
                 .disasm_all(&instruction_bytes, address as u64)?;
 
             if let Some(instruction) = disassembled.iter().next() {
-                trace!(
+                debug!(
                     "Setting breakpoint at 0x{:x} (0x{:x}): {} {}",
                     instruction.address(),
                     relative_addr,
@@ -75,18 +75,18 @@ impl Debugger {
                     instruction.op_str().unwrap_or("")
                 );
             } else {
-                trace!("Unable to disassemble instruction at 0x{:x}", address);
+                debug!("Unable to disassemble instruction at 0x{:x}", address);
             }
         }
 
-        trace!("Set the breakpoint by writing the INT 3 instruction");
+        debug!("Set the breakpoint by writing the INT 3 instruction");
         ptrace::write(
             self.pid,
             address as AddressType,
             BREAKPOINT_INSTRUCTION as std::ffi::c_long,
         )?;
 
-        trace!("Store the original instruction");
+        debug!("Store the original instruction");
         self.breakpoints.insert(
             address,
             BreakPoint {
@@ -137,7 +137,7 @@ impl Debugger {
             let file = std::fs::read_to_string(file_name)?;
             let line = file.lines().nth(line_nr as usize - 1).unwrap();
 
-            trace!("{file_name}:{line_nr}: {line}");
+            debug!("{file_name}:{line_nr}: {line}");
         }
 
         Ok(())
@@ -148,14 +148,14 @@ impl Debugger {
         loop {
             ptrace::cont(self.pid, None)?;
             let wait_status = wait()?;
-            trace!("Tracer: received wait status: {wait_status:?}");
+            debug!("Tracer: received wait status: {wait_status:?}");
 
             if let WaitStatus::Exited(_, _) = wait_status {
                 break;
             }
 
             let regs = ptrace::getregs(self.pid)?;
-            trace!("Got regs: {regs:?}");
+            debug!("Got regs: {regs:?}");
             if self
                 .breakpoints
                 .keys()
@@ -173,12 +173,12 @@ impl Debugger {
 pub fn spawn_process(executable: &str) -> Result<Pid> {
     match unsafe { fork() }? {
         ForkResult::Parent { child } => {
-            trace!("Parent: Child pid is {child}");
+            debug!("Parent: Child pid is {child}");
             Ok(child)
         }
         ForkResult::Child => {
             ptrace::traceme()?;
-            trace!("Child: Invoked ptrace::traceme. Executing the binary...");
+            debug!("Child: Invoked ptrace::traceme. Executing the binary...");
             std::process::Command::new(executable).exec();
             unreachable!();
         }

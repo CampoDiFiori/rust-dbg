@@ -197,6 +197,7 @@ dependencies = [
  "addr2line 0.23.0",
  "capstone",
  "color-eyre",
+ "crossterm",
  "dotenv",
  "eyre",
  "gimli 0.31.0",
