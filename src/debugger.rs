@@ -24,7 +24,7 @@ pub struct Debugger {
     pub base_address: usize,
     pub disassembler: Capstone,
     pub pid: Pid,
-    pub loader: addr2line::Loader,
+    pub a2l_loader: addr2line::Loader,
     pub breakpoints: HashMap<Address, BreakPoint>,
 }
 
@@ -48,7 +48,7 @@ impl Debugger {
             object,
             disassembler,
             pid,
-            loader,
+            a2l_loader: loader,
             breakpoints: HashMap::new(),
         })
     }
@@ -124,7 +124,7 @@ impl Debugger {
         }
 
         {
-            let Ok(Some(location)) = self.loader.find_location(bp.relative_addr as _) else {
+            let Ok(Some(location)) = self.a2l_loader.find_location(bp.relative_addr as _) else {
                 debug!("No location in source found for address 0x{breakpoint_address:2x}");
                 return Ok(());
             };

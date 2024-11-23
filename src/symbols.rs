@@ -2,19 +2,19 @@ use addr2line::{Loader, Location};
 use object::{Object, ObjectSymbol, Symbol};
 use tracing::trace;
 
-use crate::{files::ProjectFileCache, AppError};
+use crate::{source_files::SourceFiles, AppError};
 
 pub fn find_main_symbol_address(
-    loader: &Loader,
-    object: &object::File,
-    file_cache: &ProjectFileCache,
+    a2l_loader: &Loader,
+    object_file: &object::File,
+    source_files: &SourceFiles,
 ) -> Result<usize, AppError> {
-    if !object.has_debug_symbols() {
+    if !object_file.has_debug_symbols() {
         return Err(AppError::NoDebugSymbols);
     }
 
-    for symbol in object.symbols() {
-        let location = loader.find_location(symbol.address())?;
+    for symbol in object_file.symbols() {
+        let location = a2l_loader.find_location(symbol.address())?;
 
         let Some(location) = location else {
             continue;
@@ -22,7 +22,7 @@ pub fn find_main_symbol_address(
 
         if location
             .file
-            .map(|f| !file_cache.contains(f.as_ref()))
+            .map(|f| !source_files.contains(f.as_ref()))
             .unwrap_or(true)
         {
             continue;
@@ -32,7 +32,7 @@ pub fn find_main_symbol_address(
             continue;
         };
 
-        print_symbol_location(Some(location), &symbol, file_cache);
+        print_symbol_location(Some(location), &symbol, source_files);
 
         if symbol_name.to_string().contains("::main::") {
             return Ok(symbol.address() as usize);
@@ -45,7 +45,7 @@ pub fn find_main_symbol_address(
 pub fn print_symbol_location(
     location: Option<Location<'_>>,
     symbol: &Symbol,
-    file_cache: &ProjectFileCache,
+    file_cache: &SourceFiles,
 ) {
     let Some(location) = location else {
         return;

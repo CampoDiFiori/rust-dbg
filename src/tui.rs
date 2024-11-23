@@ -1,19 +1,17 @@
 use std::io::Read;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use nix::sys::signal::Signal;
-use ratatui::layout::{Rect, Size};
+use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::symbols::border::THICK;
 use ratatui::{
     style::Stylize,
     widgets::{block::Title, Block, Paragraph, Widget},
 };
-use tracing::info;
 
-use crate::files::ProjectFileCache;
+use crate::source_files::SourceFiles;
 
-pub fn run_tui(files: ProjectFileCache) -> std::io::Result<()> {
+pub fn run_tui(files: SourceFiles) -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     terminal.clear()?;
 
@@ -24,12 +22,16 @@ pub fn run_tui(files: ProjectFileCache) -> std::io::Result<()> {
     let mut file_content = String::new();
     let mut picker_content = String::new();
 
+    let breakpoint_lines = vec![1, 2, 3, 4, 5];
+
     file.read_to_string(&mut file_content)?;
     tui.files.to_buffer(&mut picker_content);
 
     let w = CoolWidget {
         file_content: &file_content,
         picker_content: &picker_content,
+        focus: Focus::Picker,
+        breakpoint_lines: &breakpoint_lines,
     };
 
     loop {
@@ -52,12 +54,20 @@ pub fn run_tui(files: ProjectFileCache) -> std::io::Result<()> {
 }
 
 pub struct Tui {
-    files: ProjectFileCache,
+    files: SourceFiles,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus {
+    Picker,
+    File,
 }
 
 struct CoolWidget<'a> {
     file_content: &'a str,
     picker_content: &'a str,
+    focus: Focus,
+    breakpoint_lines: &'a [u16],
 }
 
 const PICKER_WIDTH: u16 = 30;
@@ -67,28 +77,59 @@ impl Widget for &CoolWidget<'_> {
     where
         Self: Sized,
     {
-        let border_style = Style::new().blue();
+        let style = |area: Focus| {
+            if area == self.focus {
+                Style::new().green()
+            } else {
+                Style::new().blue()
+            }
+        };
 
-        let title = Title::from(" Picker ".bold().style(border_style));
-        let block = Block::bordered()
-            .title(title.alignment(ratatui::layout::Alignment::Center))
-            .border_set(THICK)
-            .border_style(border_style);
+        // File picker
+        {
+            let border_style = style(Focus::Picker);
+            let title = Title::from(" Picker ".bold().style(border_style));
+            let block = Block::bordered()
+                .title(title.alignment(ratatui::layout::Alignment::Center))
+                .border_set(THICK)
+                .border_style(border_style);
 
-        let picker_area = Rect::new(0, 0, PICKER_WIDTH, area.height);
-        Paragraph::new(self.picker_content)
-            .block(block)
-            .render(picker_area, buf);
+            let picker_area = Rect::new(0, 0, PICKER_WIDTH, area.height);
+            Paragraph::new(self.picker_content)
+                .block(block)
+                .render(picker_area, buf);
+        }
 
-        let title = Title::from(" File ".bold().style(border_style));
-        let block = Block::bordered()
-            .title(title.alignment(ratatui::layout::Alignment::Center))
-            .border_set(THICK)
-            .border_style(border_style);
+        // File content
+        {
+            let border_style = style(Focus::File);
+            let title = Title::from(" File ".bold().style(border_style));
+            let block = Block::bordered()
+                .title(title.alignment(ratatui::layout::Alignment::Center))
+                .border_set(THICK)
+                .border_style(border_style);
 
-        let file_area = Rect::new(PICKER_WIDTH, 0, area.width - PICKER_WIDTH, area.height);
-        Paragraph::new(self.file_content)
-            .block(block)
-            .render(file_area, buf);
+            // A column with breakpoint dots
+            let mut breakpoints_content = String::new();
+            let breakpoints_rect = Rect::new(PICKER_WIDTH, 0, 2, area.height);
+            for i in 0..area.height {
+                if self.breakpoint_lines.contains(&i) {
+                    breakpoints_content.push_str("B");
+                } else {
+                    breakpoints_content.push_str(" ");
+                }
+            }
+            Paragraph::new(breakpoints_content).render(breakpoints_rect, buf);
+
+            let file_area = Rect::new(
+                PICKER_WIDTH + 2,
+                0,
+                area.width - PICKER_WIDTH - 2,
+                area.height,
+            );
+            Paragraph::new(self.file_content)
+                .block(block)
+                .render(file_area, buf);
+        }
     }
 }

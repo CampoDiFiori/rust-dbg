@@ -6,27 +6,26 @@ use std::{
 };
 
 use color_eyre::Result;
-use eyre::ContextCompat;
-use tracing::instrument;
-
-pub type FdIdx = usize;
-pub const NO_FILE_OPEN: FdIdx = FdIdx::MAX;
 
 #[derive(Default)]
-pub struct ProjectFileCache {
+pub struct SourceFiles {
+    project_root: String,
     file_names: HashSet<PathBuf>,
     file_readers: HashMap<PathBuf, BufReader<File>>,
 }
 
-impl ProjectFileCache {
-    pub fn new(absolute_dir_path: &Path) -> Result<Self> {
-        let mut ret = Self::default();
+impl SourceFiles {
+    pub fn new(project_root: &Path) -> Result<Self> {
+        let mut ret = Self {
+            project_root: project_root.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
 
         // if absolute_dir_path.is_relative() {
         //     return Err(AppError::NotAbsolutePath);
         // }
 
-        for f in walkdir::WalkDir::new(absolute_dir_path) {
+        for f in walkdir::WalkDir::new(project_root) {
             let f = f?;
 
             if f.file_type().is_file() {
@@ -58,7 +57,11 @@ impl ProjectFileCache {
 
         for f in self.file_names.iter() {
             if let Some(s) = f.as_os_str().to_str() {
-                writeln!(buffer, "{s}");
+                writeln!(
+                    buffer,
+                    "{}",
+                    s.strip_prefix(&self.project_root).unwrap_or(s)
+                );
             }
         }
     }

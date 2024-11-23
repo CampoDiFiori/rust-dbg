@@ -1,6 +1,6 @@
 mod debugger;
 mod error;
-mod files;
+mod source_files;
 mod symbols;
 mod tui;
 mod utils;
@@ -8,31 +8,31 @@ mod utils;
 use color_eyre::Result;
 use debugger::{spawn_process, Debugger};
 use error::AppError;
-use files::ProjectFileCache;
+use source_files::SourceFiles;
 use symbols::find_main_symbol_address;
 use tracing::debug;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 use tui::run_tui;
 
-fn run_debugger(executable: &str, file_cache: ProjectFileCache) -> Result<()> {
-    let loader = addr2line::Loader::new(executable).unwrap();
-    let buf = std::fs::read(executable)?.into_boxed_slice();
-    let buf: &'static mut [u8] = Box::leak(buf);
-    let object: object::File<'static> = object::File::parse(&*buf)?;
+fn run_debugger(exe_path: &str, source_files: SourceFiles) -> Result<()> {
+    let a2l_loader = addr2line::Loader::new(exe_path).unwrap();
+    let exe_text = std::fs::read(exe_path)?.into_boxed_slice();
+    let exe_text: &'static mut [u8] = Box::leak(exe_text);
+    let obj_file: object::File<'static> = object::File::parse(&*exe_text)?;
 
     // dump_file_symbols(executable.as_ref(), &file_cache).unwrap();
-    let main_addr = find_main_symbol_address(&loader, &object, &file_cache).unwrap();
-    let pid = spawn_process(executable)?;
+    let tracee_main_addr = find_main_symbol_address(&a2l_loader, &obj_file, &source_files).unwrap();
+    let tracee_pid = spawn_process(exe_path)?;
 
     debug!("{:?}", nix::sys::wait::wait()?);
 
-    let base_address = utils::get_base_address_from_procfs(pid).unwrap();
+    let tracee_base_addr = utils::get_base_address_from_procfs(tracee_pid).unwrap();
 
-    let mut debugger = Debugger::new(executable, base_address, object, pid)?;
+    let mut debugger = Debugger::new(exe_path, tracee_base_addr, obj_file, tracee_pid)?;
 
-    debug!("Tracee's base address is  0x{base_address:02x}");
+    debug!("Tracee's base address is  0x{tracee_base_addr:02x}");
 
-    debugger.set_breakpoint(main_addr)?;
+    debugger.set_breakpoint(tracee_main_addr)?;
     debugger.run()?;
 
     Ok(())
@@ -56,9 +56,11 @@ fn main() {
         .init();
 
     let project_dir = "/home/pdudko/cool/examples";
-    let files = ProjectFileCache::new(project_dir.as_ref()).unwrap();
+    let exe_path = "/home/pdudko/cool/target/debug/examples/test";
 
-    let thread = std::thread::spawn(|| run_tui(files));
+    let source_files = SourceFiles::new(project_dir.as_ref()).unwrap();
+    run_debugger(exe_path, source_files).unwrap();
 
-    thread.join().unwrap().unwrap();
+    // let tui_thread = std::thread::spawn(|| run_tui(source_files));
+    // tui_thread.join().unwrap().unwrap();
 }
